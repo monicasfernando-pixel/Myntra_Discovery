@@ -1,19 +1,19 @@
 """Discovery Engine — Streamlit findings dashboard.
 
-Reads ONLY data/snapshot.json. Live scraping writes a temp snapshot and
-replaces the file on success; the currently displayed snapshot is never
-cleared on a rerun or a failed scrape.
+Reads ONLY data/snapshot.json and renders the tabs. Live scraping lives in
+pipeline/snapshot_pipeline.py and is never imported here, so Community Cloud
+can install the slim requirements.txt (streamlit + pandas) without scraper
+packages.
 """
 
 from __future__ import annotations
 
 import html
 import json
-import os
 
 import streamlit as st
 
-from paths import SNAPSHOT_PATH, SNAPSHOT_TMP
+from paths import SNAPSHOT_PATH
 
 st.set_page_config(
     page_title="Discovery Engine- Myntra",
@@ -343,27 +343,16 @@ def render_engine(snap):
     )
 
 
-def _init_state():
-    st.session_state.setdefault("scrape_requested", False)
-    st.session_state.setdefault("scrape_error", None)
-
-
 def _load_or_none():
-    path = ROOT / "data" / "snapshot.json"
-    if not path.exists():
+    if not SNAPSHOT_PATH.exists():
         return None
     try:
-        os.chdir(ROOT)
         return load_snapshot()
     except Exception:
         return None
 
 
-_init_state()
 st.markdown(CSS, unsafe_allow_html=True)
-os.chdir(ROOT)
-
-status_slot = st.empty()
 snap = _load_or_none()
 
 head_l, head_r = st.columns([3, 2])
@@ -375,26 +364,22 @@ with head_l:
             unsafe_allow_html=True,
         )
 with head_r:
-    scrape_clicked = st.button(
-        "Scrape again",
+    reload_clicked = st.button(
+        "View latest snapshot",
         type="secondary",
-        disabled=bool(st.session_state.scrape_requested),
-        help="Runs the pipeline in the background and swaps the snapshot only if it succeeds.",
+        help="Reload data/snapshot.json from the repo. Does not scrape.",
     )
     if snap:
         st.caption(f"Uses a cached snapshot — last extracted {snap.get('extracted_at', '—')}.")
     else:
-        st.caption("No snapshot found — run the pipeline to generate data/snapshot.json")
+        st.caption("No snapshot found — data/snapshot.json is missing from the repo.")
 
-if scrape_clicked and not st.session_state.scrape_requested:
-    st.session_state.scrape_requested = True
-    st.session_state.scrape_error = None
-
-if st.session_state.scrape_error:
-    st.error(st.session_state.scrape_error)
+if reload_clicked:
+    load_snapshot.clear()
+    st.rerun()
 
 if not snap:
-    st.warning("No snapshot found — run the pipeline to generate data/snapshot.json")
+    st.warning("No snapshot found — data/snapshot.json is missing from the repo.")
 else:
     tab_corpus, tab_themes, tab_questions, tab_opps, tab_honesty, tab_verbs, tab_engine = st.tabs(
         ["Corpus", "Themes", "Questions", "Opportunities", "Honesty check", "Verbatims", "Engine"]
@@ -414,33 +399,3 @@ else:
     with tab_engine:
         render_engine(snap)
 
-# Scrape AFTER tabs so the current snapshot stays on screen the whole time.
-if st.session_state.scrape_requested:
-    with status_slot.status("Scraping… the current snapshot stays on screen.", expanded=True) as status:
-        try:
-            from pipeline.snapshot_pipeline import run_live_scrape_to_path
-
-            SNAPSHOT_TMP.parent.mkdir(parents=True, exist_ok=True)
-            if SNAPSHOT_TMP.exists():
-                SNAPSHOT_TMP.unlink()
-
-            def _progress(msg: str) -> None:
-                status.write(msg)
-
-            run_live_scrape_to_path(SNAPSHOT_TMP, progress=_progress)
-            os.replace(SNAPSHOT_TMP, SNAPSHOT_PATH)
-            load_snapshot.clear()
-            st.session_state.scrape_requested = False
-            st.session_state.scrape_error = None
-            status.update(label="Snapshot updated", state="complete")
-            st.rerun()
-        except Exception as exc:  # noqa: BLE001
-            st.session_state.scrape_requested = False
-            st.session_state.scrape_error = str(exc)
-            try:
-                if SNAPSHOT_TMP.exists():
-                    SNAPSHOT_TMP.unlink()
-            except OSError:
-                pass
-            status.update(label="Scrape failed — snapshot unchanged", state="error")
-            st.error(str(exc))

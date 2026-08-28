@@ -1,5 +1,8 @@
 """Live scrape pipeline that writes a NEW snapshot to a caller-chosen path.
 
+Local-only. Do not import this module from app.py — Streamlit Community Cloud
+does not install scraper/pipeline packages.
+
 A failed scrape raises and never touches data/snapshot.json. The classified
 CSV is updated only after the dest snapshot file has been written successfully.
 """
